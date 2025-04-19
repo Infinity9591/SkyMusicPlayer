@@ -9,20 +9,21 @@ from pynput.keyboard import Controller
 
 from demo import Ui_MainWindow
 
-windows = pygetwindow.getWindowsWithTitle("Sky")
+# windows = pygetwindow.getWindowsWithTitle("Sky")
 
 sky = None
 
-for window in windows:
-    if window.title == "Sky":
-        sky = window
-
-def focusWindow():
-    try:
-        sky.activate()
-    except:
-        sky.minimize()
-        sky.restore()
+# for window in windows:
+#     if window.title == "Sky":
+#         sky = window
+#         print(sky)
+#
+# def focusWindow():
+#     try:
+#         sky.activate()
+#     except:
+#         sky.minimize()
+#         sky.restore()
 
 keyboard = Controller()
 
@@ -58,6 +59,186 @@ key_maps = {
     '2Key13': '.',
     '2Key14': '/'
 }
+
+class KeyPressThread(threading.Thread):
+    def __init__(self, note_time, note_key):
+        super().__init__()
+        self.note_time = note_time
+        self.note_key = note_key
+
+    def run(self):
+        if self.note_key in key_maps:
+            keyboard.press(key_maps[self.note_key])
+            time.sleep(0.02)  # short delay to ensure note is pressed
+            keyboard.release(key_maps[self.note_key])  # release key
+        else:
+            print("Skipped: Key not found in mapping")
+
+class ClickableLineEdit(QLineEdit):
+    def mousePressEvent(self, event):
+        super().mousePressEvent(event)
+        folder = QFileDialog.getExistingDirectory(self, "Select folder")
+        if folder:
+            self.setText(folder)
+
+class MainWindow(QMainWindow):
+
+    def __init__(self):
+        super().__init__()
+        global sky
+        self.folder_path = ""
+        self.song_data = ""
+        self.ui = Ui_MainWindow()
+        self.ui.setupUi(self)
+        # self.ui.comboBoxCodec.addItem("utf-8")
+        # self.ui.comboBoxCodec.addItem("utf-16")
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_countdown)
+        self.is_counting_down = False
+        self.ui.radioButtonUTF8.setChecked(True)
+        windows = pygetwindow.getWindowsWithTitle("Sky")
+        for window in windows:
+            if window.title == "Sky":
+                sky = window
+
+        # try:
+        #     sky.activate()
+        # except:
+        #     sky.minimize()
+        #     sky.restore()
+        if sky == None:
+            self.ui.plainTextEditLogs.appendPlainText(
+                "Sky was not detected, please open Sky before playing songs.")
+            # quit()
+
+        self.ui.lineEditFolder.setVisible(False)
+
+        self.lineEditCustom = ClickableLineEdit(self)
+        self.lineEditCustom.setGeometry(self.ui.lineEditFolder.geometry())
+        self.lineEditCustom.setText("Click to choose folder")
+        self.ui.pushButtonSelectFolder.clicked.connect(self.show_files_in_folder)
+        self.ui.pushButtonPlay.clicked.connect(self.on_button_click)
+        self.ui.pushButtonCancel.clicked.connect(self.cancel_song)
+        self.ui.pushButtonDetectWindow.clicked.connect(self.focus_sky_window)
+
+
+
+    def update_sky_window(self):
+        global sky
+        windows = pygetwindow.getWindowsWithTitle("Sky")
+        for window in windows:
+            if window.title == "Sky":
+                sky = window
+                return True
+        sky = None
+        return False
+
+    def focus_sky_window(self):
+        if not self.update_sky_window():
+            self.ui.plainTextEditLogs.clear()
+            self.ui.plainTextEditLogs.appendPlainText("❌ Can't find Sky window.")
+            return
+
+        try:
+            sky.activate()
+            self.ui.plainTextEditLogs.clear()
+            self.ui.plainTextEditLogs.appendPlainText("✅ Focused to Sky Window.")
+        except:
+            try:
+                sky.minimize()
+                sky.restore()
+                sky.activate()
+                self.ui.plainTextEditLogs.clear()
+                self.ui.plainTextEditLogs.appendPlainText("✅ Focused to Sky Window (restore).")
+            except Exception as e:
+                self.ui.plainTextEditLogs.clear()
+                self.ui.plainTextEditLogs.appendPlainText(f"❌ Can't focus: {e}")
+
+    def on_button_click(self):
+        if self.start_play():
+            self.start_countdown()
+        else:
+            self.ui.plainTextEditLogs.clear()
+            self.ui.plainTextEditLogs.appendPlainText("⛔ Can't play song.")
+
+    def start_countdown(self):
+        if self.is_counting_down:
+            return
+        self.is_counting_down = True
+        self.countdown = 3
+        self.ui.plainTextEditLogs.clear()
+        self.timer.start(1000)
+        return False
+
+    def update_countdown(self):
+        if self.countdown > 0:
+            self.ui.plainTextEditLogs.appendPlainText(f"Playing song in {self.countdown}")
+            self.countdown -= 1
+        else:
+            self.timer.stop()
+            self.is_counting_down = False
+            song_name = self.song_data[0]["name"]
+            self.ui.plainTextEditLogs.appendPlainText(f"▶ Start song {song_name}!")
+            self.play_song()
+
+    def cancel_song(self):
+        if hasattr(self, 'player_thread') and self.player_thread.isRunning():
+            self.player_thread.terminate()
+            self.player_thread.wait()
+
+        self.ui.radioButtonUTF8.setChecked(True)
+        self.ui.plainTextEditLogs.clear()
+        self.ui.lineEditFolder.setText("")
+        self.ui.plainTextEditLogs.appendPlainText("⏸ Canceling song")
+
+        if self.timer.isActive():
+            self.timer.stop()
+            self.countdown = 3
+
+    def show_files_in_folder(self ):
+        self.folder_path = self.lineEditCustom.text()
+        if not self.folder_path or not os.path.isdir(self.folder_path):
+            self.ui.listWidgetFiles.clear()
+            self.ui.listWidgetFiles.addItems(["❌ Folder is invalid."])
+            return
+
+        files = os.listdir(self.folder_path)
+        if not files:
+            self.ui.listWidgetFiles.clear()
+            self.ui.listWidgetFiles.addItems(["📁 Folder has no files."])
+            return
+
+        only_files = [f for f in files if os.path.isfile(os.path.join(self.folder_path, f))]
+
+        self.ui.listWidgetFiles.clear()
+        self.ui.listWidgetFiles.addItems(only_files)
+
+    def start_play(self):
+        self.ui.plainTextEditLogs.appendPlainText('debug')
+        item = self.ui.listWidgetFiles.currentItem().text()
+        if self.ui.radioButtonUTF8.isChecked():
+            codec = "utf-8"
+        elif self.ui.radioButtonUTF16.isChecked():
+            codec = "utf-16"
+        # codec = self.ui.comboBoxCodec.currentText()
+        try:
+            with open(f'{self.folder_path}/{item}', 'r', encoding=codec) as file:
+                self.song_data = json.load(file)
+            return True
+
+        except FileNotFoundError:
+            self.ui.plainTextEditLogs.clear()
+            self.ui.plainTextEditLogs.appendPlainText("Song not found.")
+            return False
+        except UnicodeDecodeError as e:
+            self.ui.plainTextEditLogs.clear()
+            self.ui.plainTextEditLogs.appendPlainText(f"❌ Can't read file : {e}")
+            return False
+
+    def play_song(self):
+        self.player_thread = SongPlayerThread(self.song_data[0])
+        self.player_thread.log_signal.connect(self.ui.plainTextEditLogs.appendPlainText)
+        self.player_thread.start()
 
 class SongPlayerThread(QThread):
     log_signal = Signal(str)
@@ -95,138 +276,6 @@ class SongPlayerThread(QThread):
                 self.log_signal.emit("▶ Resuming song...")
 
         self.log_signal.emit(f"✅ Finished playing {self.song_data['name']}")
-
-
-class KeyPressThread(threading.Thread):
-    def __init__(self, note_time, note_key):
-        super().__init__()
-        self.note_time = note_time
-        self.note_key = note_key
-
-    def run(self):
-        if self.note_key in key_maps:
-            keyboard.press(key_maps[self.note_key])
-            time.sleep(0.02)  # short delay to ensure note is pressed
-            keyboard.release(key_maps[self.note_key])  # release key
-        else:
-            print("Skipped: Key not found in mapping")
-
-class ClickableLineEdit(QLineEdit):
-    def mousePressEvent(self, event):
-        super().mousePressEvent(event)
-        folder = QFileDialog.getExistingDirectory(self, "Select folder")
-        if folder:
-            self.setText(folder)
-
-class MainWindow(QMainWindow):
-
-    def __init__(self):
-        super().__init__()
-        self.folder_path = ""
-        self.song_data = ""
-        self.ui = Ui_MainWindow()
-        self.ui.setupUi(self)
-        self.ui.comboBoxCodec.addItem("utf-8")
-        self.ui.comboBoxCodec.addItem("utf-16")
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.update_countdown)
-        self.is_counting_down = False
-
-        self.ui.lineEditFolder.setVisible(False)
-
-        self.lineEditCustom = ClickableLineEdit(self)
-        self.lineEditCustom.setGeometry(self.ui.lineEditFolder.geometry())
-        self.lineEditCustom.setText("Click to choose folder")
-        self.ui.btnSelectFolder.clicked.connect(self.show_files_in_folder)
-        self.ui.pushButtonPlay.clicked.connect(self.on_button_click)
-        self.ui.pushButtonCancel.clicked.connect(self.cancel_song)
-        if sky == None:
-            self.ui.plainTextEditLog.appendPlainText(
-                "Sky was not detected, please open Sky before playing songs.")
-            # quit()
-
-    def on_button_click(self):
-        if self.start_play():
-            self.start_countdown()
-        else:
-            self.ui.plainTextEditLog.clear()
-            self.ui.plainTextEditLog.appendPlainText("⛔ Can't play song.")
-
-    def start_countdown(self):
-        if self.is_counting_down:
-            return
-        self.is_counting_down = True
-        self.countdown = 3
-        self.ui.plainTextEditLog.clear()
-        self.timer.start(1000)
-        return False
-
-    def update_countdown(self):
-        if self.countdown > 0:
-            self.ui.plainTextEditLog.appendPlainText(f"Playing song in {self.countdown}")
-            self.countdown -= 1
-        else:
-            self.timer.stop()
-            self.is_counting_down = False
-            self.ui.plainTextEditLog.appendPlainText("▶ Start!")
-            self.play_song()
-
-    def cancel_song(self):
-        if hasattr(self, 'player_thread') and self.player_thread.isRunning():
-            self.player_thread.terminate()
-            self.player_thread.wait()
-
-
-        self.ui.plainTextEditLog.clear()
-        self.ui.comboBoxCodec.setCurrentIndex(0)
-        self.ui.lineEditFolder.setText("")
-        self.ui.plainTextEditLog.appendPlainText("⏸ Canceling song")
-
-        if self.timer.isActive():
-            self.timer.stop()
-            self.countdown = 3
-
-    def show_files_in_folder(self ):
-        self.folder_path = self.lineEditCustom.text()
-        if not self.folder_path or not os.path.isdir(self.folder_path):
-            self.ui.listWidgetListFiles.clear()
-            self.ui.listWidgetListFiles.addItems(["❌ Folder is invalid."])
-            return
-
-        files = os.listdir(self.folder_path)
-        if not files:
-            self.ui.listWidgetListFiles.clear()
-            self.ui.listWidgetListFiles.addItems(["📁 Folder has no files."])
-            return
-
-        only_files = [f for f in files if os.path.isfile(os.path.join(self.folder_path, f))]
-
-        self.ui.listWidgetListFiles.clear()
-        self.ui.listWidgetListFiles.addItems(only_files)
-
-    def start_play(self):
-        self.ui.plainTextEditLog.appendPlainText('debug')
-        item = self.ui.listWidgetListFiles.currentItem().text()
-        codec = self.ui.comboBoxCodec.currentText()
-        try:
-            with open(f'{self.folder_path}/{item}', 'r', encoding=codec) as file:
-                self.song_data = json.load(file)
-            return True
-
-        except FileNotFoundError:
-            self.ui.plainTextEditLog.clear()
-            self.ui.plainTextEditLog.appendPlainText("Song not found.")
-            return False
-        except UnicodeDecodeError as e:
-            self.ui.plainTextEditLog.clear()
-            self.ui.plainTextEditLog.appendPlainText(f"❌ Can't read file : {e}")
-            return False
-
-    def play_song(self):
-        self.player_thread = SongPlayerThread(self.song_data[0])
-        self.player_thread.log_signal.connect(self.ui.plainTextEditLog.appendPlainText)
-        self.player_thread.start()
-
 
 if __name__ == "__main__":
     app = QApplication([])
