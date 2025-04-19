@@ -1,2 +1,6 @@
-songs/*
-!songs/Flower Dance.skysheet
+.venv
+.idea
+.gitattributes
+app.spec
+build
+dist
