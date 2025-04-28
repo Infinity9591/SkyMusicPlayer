@@ -9,21 +9,7 @@ from pynput.keyboard import Controller
 
 from demo import Ui_MainWindow
 
-# windows = pygetwindow.getWindowsWithTitle("Sky")
-
 sky = None
-
-# for window in windows:
-#     if window.title == "Sky":
-#         sky = window
-#         print(sky)
-#
-# def focusWindow():
-#     try:
-#         sky.activate()
-#     except:
-#         sky.minimize()
-#         sky.restore()
 
 keyboard = Controller()
 
@@ -90,38 +76,28 @@ class MainWindow(QMainWindow):
         self.song_data = ""
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
-        # self.ui.comboBoxCodec.addItem("utf-8")
-        # self.ui.comboBoxCodec.addItem("utf-16")
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_countdown)
         self.is_counting_down = False
-        self.ui.radioButtonUTF8.setChecked(True)
         windows = pygetwindow.getWindowsWithTitle("Sky")
         for window in windows:
             if window.title == "Sky":
                 sky = window
 
-        # try:
-        #     sky.activate()
-        # except:
-        #     sky.minimize()
-        #     sky.restore()
         if sky == None:
             self.ui.plainTextEditLogs.appendPlainText(
                 "Sky was not detected, please open Sky before playing songs.")
-            # quit()
 
         self.ui.lineEditFolder.setVisible(False)
 
         self.lineEditCustom = ClickableLineEdit(self)
         self.lineEditCustom.setGeometry(self.ui.lineEditFolder.geometry())
-        self.lineEditCustom.setText("Click to choose folder")
+        self.lineEditCustom.setPlaceholderText("Click to choose folder")
         self.ui.pushButtonSelectFolder.clicked.connect(self.show_files_in_folder)
         self.ui.pushButtonPlay.clicked.connect(self.on_button_click)
         self.ui.pushButtonCancel.clicked.connect(self.cancel_song)
         self.ui.pushButtonDetectWindow.clicked.connect(self.focus_sky_window)
-
-
+        self.ui.listWidgetFiles.clicked.connect(self.show_infor)
 
     def update_sky_window(self):
         global sky
@@ -186,14 +162,48 @@ class MainWindow(QMainWindow):
             self.player_thread.terminate()
             self.player_thread.wait()
 
-        self.ui.radioButtonUTF8.setChecked(True)
         self.ui.plainTextEditLogs.clear()
         self.ui.lineEditFolder.setText("")
         self.ui.plainTextEditLogs.appendPlainText("⏸ Canceling song")
 
+        self.timer.stop()  # Dừng bộ đếm ngược
+        self.is_counting_down = False
+        self.countdown = 3  # Reset lại giá trị đếm ngược
+        self.ui.plainTextEditLogs.appendPlainText(f"Countdown reset to {self.countdown}")
+
         if self.timer.isActive():
             self.timer.stop()
             self.countdown = 3
+
+    def show_infor(self):
+        self.ui.plainTextInfor.clear()
+        item = self.ui.listWidgetFiles.currentItem().text()
+        self.data = ""
+        try:
+            with open(f'{self.folder_path}/{item}', 'r', encoding="utf-8") as file:
+                self.data = json.load(file)
+            # return True
+        except :
+            with open(f'{self.folder_path}/{item}', 'r', encoding="utf-16") as file:
+                self.data = json.load(file)
+            # return True
+        self.song_name = self.data[0]["name"] if self.data[0]["name"] is not None else "Unknown"
+        self.bpm = self.data[0].get('bpm', 'Unknown')
+        self.author = self.data[0].get('author', 'Unknown')
+        self.instruments = self.data[0].get('instruments', 'Unknown')
+        self.ui.plainTextInfor.appendPlainText("Name: " + self.song_name)
+        self.ui.plainTextInfor.appendPlainText("Author: " + self.author)
+        self.ui.plainTextInfor.appendPlainText("BPM: " + str(self.bpm))
+        # self.ui.plainTextInfor.appendPlainText("Instrument: " + str(type(self.instruments)))
+
+        self.ui.plainTextInfor.appendPlainText("Instrument: ")
+        if isinstance(self.instruments, list):
+            # Lấy các tên nhạc cụ trong danh sách và loại bỏ giá trị trùng lặp bằng cách sử dụng set
+            unique_instruments = set(instrument['name'] for instrument in self.instruments)
+            # Nối các tên nhạc cụ bằng dấu phẩy và hiển thị
+            self.ui.plainTextInfor.appendPlainText(", ".join(unique_instruments))
+        else:
+            self.ui.plainTextInfor.appendPlainText(self.instruments)
 
     def show_files_in_folder(self ):
         self.folder_path = self.lineEditCustom.text()
@@ -214,15 +224,9 @@ class MainWindow(QMainWindow):
         self.ui.listWidgetFiles.addItems(only_files)
 
     def start_play(self):
-        self.ui.plainTextEditLogs.appendPlainText('debug')
         item = self.ui.listWidgetFiles.currentItem().text()
-        if self.ui.radioButtonUTF8.isChecked():
-            codec = "utf-8"
-        elif self.ui.radioButtonUTF16.isChecked():
-            codec = "utf-16"
-        # codec = self.ui.comboBoxCodec.currentText()
         try:
-            with open(f'{self.folder_path}/{item}', 'r', encoding=codec) as file:
+            with open(f'{self.folder_path}/{item}', 'r', encoding="utf-8") as file:
                 self.song_data = json.load(file)
             return True
 
@@ -231,9 +235,12 @@ class MainWindow(QMainWindow):
             self.ui.plainTextEditLogs.appendPlainText("Song not found.")
             return False
         except UnicodeDecodeError as e:
-            self.ui.plainTextEditLogs.clear()
-            self.ui.plainTextEditLogs.appendPlainText(f"❌ Can't read file : {e}")
-            return False
+            # self.ui.plainTextEditLogs.clear()
+            # self.ui.plainTextEditLogs.appendPlainText(f"❌ Can't read file : {e}")
+            # return False
+            with open(f'{self.folder_path}/{item}', 'r', encoding="utf-16") as file:
+                self.song_data = json.load(file)
+            return True
 
     def play_song(self):
         self.player_thread = SongPlayerThread(self.song_data[0])
