@@ -50,6 +50,80 @@ key_maps = {
     '2Key14': '/'
 }
 
+class ServerThread(QThread):
+    log_signal = Signal(str)
+
+    def __init__(self, host, port):
+        super().__init__()
+        self.host = host
+        self.port = port
+        self.is_running = True
+
+    def run(self):
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_socket.bind((self.host, self.port))
+        server_socket.listen(5)
+        self.log_signal.emit(f"Server đang lắng nghe tại {self.host}:{self.port}")
+
+        while self.is_running:
+            try:
+                server_socket.settimeout(1.0)  # Thêm timeout để không kẹt vĩnh viễn
+                client_socket, addr = server_socket.accept()
+                self.log_signal.emit(f"Client {addr[0]} đã kết nối.")
+
+                data = client_socket.recv(1024)
+                self.log_signal.emit(f"Nhận được: {data.decode('utf-8')}")
+
+                client_socket.sendall(b"Server da nhan duoc du lieu")
+                client_socket.close()
+            except socket.timeout:
+                continue  # Không có ai connect thì quay lại vòng lặp
+            except Exception as e:
+                self.log_signal.emit(f"Lỗi server: {e}")
+                break
+
+        server_socket.close()
+        self.log_signal.emit("Server đã dừng.")
+
+    def stop(self):
+        self.is_running = False
+
+class ClientThread(QThread):
+    log_signal = Signal(str)
+
+    def __init__(self, host, port):
+        super().__init__()
+        self.host = host
+        self.port = port
+        self.is_running = True
+
+    def run(self):
+        try:
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client_socket.connect((self.host, self.port))
+            self.log_signal.emit(f"Đã kết nối tới server {self.host}:{self.port}")
+
+            while self.is_running:
+                try:
+                    self.client_socket.settimeout(1.0)
+                    data = self.client_socket.recv(1024)
+                    if data:
+                        self.log_signal.emit(f"Nhận từ server: {data.decode('utf-8')}")
+                except socket.timeout:
+                    continue
+                except Exception as e:
+                    self.log_signal.emit(f"Lỗi nhận dữ liệu: {e}")
+                    break
+
+            self.client_socket.close()
+            self.log_signal.emit("Đã ngắt kết nối server.")
+
+        except Exception as e:
+            self.log_signal.emit(f"Lỗi kết nối: {e}")
+
+    def stop(self):
+        self.is_running = False
+
 class KeyPressThread(threading.Thread):
     def __init__(self, note_time, note_key):
         super().__init__()
@@ -116,58 +190,46 @@ class MainWindow(QMainWindow):
         self.ui.comboBoxRole.addItems(["Chọn vai trò","server", "client"])
         self.ui.comboBoxRole.setCurrentIndex(0)
         self.ui.comboBoxRole.currentTextChanged.connect(self.on_role_changed)
+        self.ui.pushButtonCreateServer.clicked.connect(self.start_server)
+        self.ui.pushButtonJoinServer.clicked.connect(self.start_client)
         # self.ui.lineEditIP
-
-    def get_connected_ip(self):
-        interfaces = psutil.net_if_addrs()
-
-        # Duyệt qua các giao diện và tìm địa chỉ IP của mạng đang kết nối
-        for interface, addrs in interfaces.items():
-            # Kiểm tra nếu giao diện mạng là Wi-Fi hoặc Ethernet
-            if "Wi-Fi" in interface or "Ethernet" in interface:
-                for addr in addrs:
-                    # Kiểm tra nếu địa chỉ là IPv4
-                    if addr.family == socket.AF_INET:
-                        return addr.address
-
-        return "Không tìm thấy địa chỉ IP của mạng kết nối."
-
-    def list_network_connections(self):
-        # Lấy tất cả các kết nối mạng đang hoạt động
-        connections = psutil.net_connections(kind='inet')  # 'inet' là loại kết nối IPv4 và IPv6
-
-        for conn in connections:
-            print(f"Địa chỉ địa phương: {conn.laddr.ip}:{conn.laddr.port}")
-            if conn.raddr:
-                print(f"Địa chỉ từ xa: {conn.raddr.ip}:{conn.raddr.port}")
-            else:
-                print("Địa chỉ từ xa: Không có kết nối")
-            print(f"Trạng thái: {conn.status}")
-            print(f"Loại giao thức: {conn.type}")
-            print("-" * 50)
 
     def on_role_changed(self, role):
         if role == "server":
             # Lấy địa chỉ IP của máy tính
-            print(self.list_network_connections())
-            ip = self.get_ip_address()
+            print(self.get_radminvpn_ip())
+            ip = self.get_radminvpn_ip()
             self.ui.lineEditIP.setText(ip)
             self.ui.pushButtonCreateServer.setVisible(True)
             self.ui.pushButtonJoinServer.setVisible(False)
         if role == "client":
-            # # Lấy địa chỉ IP của máy tính
-            # print(self.list_network_connections())
-            # ip = self.get_ip_address()
-            # self.ui.lineEditIP.setText(ip)
             self.ui.pushButtonCreateServer.setVisible(False)
             self.ui.pushButtonJoinServer.setVisible(True)
 
-    def get_ip_address(self):
-        # Lấy địa chỉ IP của máy tính
-        host_info = QHostInfo.localHostName()
-        ip = QHostInfo.fromName(host_info).addresses()
-        return ip[1].toString() if ip else "Không tìm thấy IP"
+    def get_radminvpn_ip(self):
+        addrs = psutil.net_if_addrs()
+        for interface_name, interface_addresses in addrs.items():
+            if "Radmin" in interface_name:
+                for address in interface_addresses:
+                    if address.family.name == 'AF_INET':
+                        return address.address
+        return None
 
+    def start_server(self):
+        port = 5000
+        host = self.ui.lineEditIP.text()
+
+        self.server_thread = ServerThread(host, port)
+        self.server_thread.log_signal.connect(self.ui.plainTextEditLogs_2.appendPlainText)
+        self.server_thread.start()
+
+    def start_client(self):
+        host = self.ui.lineEditIP.text()
+        port = 5000
+
+        self.client_thread = ClientThread(host, port)
+        self.client_thread.log_signal.connect(self.ui.plainTextEditLogs_2.appendPlainText)
+        self.client_thread.start()
 
     def update_sky_window(self):
         global sky
