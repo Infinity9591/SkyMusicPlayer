@@ -147,6 +147,17 @@ class ClickableLineEdit(QLineEdit):
 
 class MainWindow(QMainWindow):
 
+    def closeEvent(self, event):
+        if hasattr(self, 'server_thread') and self.server_thread.isRunning():
+            self.server_thread.stop()
+            self.server_thread.wait()
+
+        if hasattr(self, 'client_thread') and self.client_thread.isRunning():
+            self.client_thread.stop()
+            self.client_thread.wait()
+
+        event.accept()
+
     def __init__(self):
         super().__init__()
         global sky
