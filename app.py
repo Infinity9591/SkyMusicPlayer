@@ -1,9 +1,13 @@
 import json
 import os
+import socket
 import threading
 import time
+
+import psutil
 import pygetwindow
 from PySide6.QtCore import Signal, QTimer, QThread
+from PySide6.QtNetwork import QHostInfo, QHostAddress
 from PySide6.QtWidgets import QApplication, QMainWindow, QFileDialog, QLineEdit
 from pynput.keyboard import Controller
 
@@ -92,6 +96,8 @@ class MainWindow(QMainWindow):
         parent_2 = self.ui.lineEditFolder_2.parent()
         self.ui.lineEditFolder.setVisible(False)
         self.ui.lineEditFolder_2.setVisible(False)
+        self.ui.pushButtonCreateServer.setVisible(False)
+        self.ui.pushButtonJoinServer.setVisible(False)
 
         self.lineEditCustom = ClickableLineEdit(parent)
         self.lineEditCustom_2 = ClickableLineEdit(parent_2)
@@ -107,6 +113,61 @@ class MainWindow(QMainWindow):
         self.ui.pushButtonDetectWindow.clicked.connect(self.focus_sky_window)
         self.ui.listWidgetFiles.clicked.connect(self.show_infor)
         self.ui.tabWidget.setCurrentIndex(0)
+        self.ui.comboBoxRole.addItems(["Chọn vai trò","server", "client"])
+        self.ui.comboBoxRole.setCurrentIndex(0)
+        self.ui.comboBoxRole.currentTextChanged.connect(self.on_role_changed)
+        # self.ui.lineEditIP
+
+    def get_connected_ip(self):
+        interfaces = psutil.net_if_addrs()
+
+        # Duyệt qua các giao diện và tìm địa chỉ IP của mạng đang kết nối
+        for interface, addrs in interfaces.items():
+            # Kiểm tra nếu giao diện mạng là Wi-Fi hoặc Ethernet
+            if "Wi-Fi" in interface or "Ethernet" in interface:
+                for addr in addrs:
+                    # Kiểm tra nếu địa chỉ là IPv4
+                    if addr.family == socket.AF_INET:
+                        return addr.address
+
+        return "Không tìm thấy địa chỉ IP của mạng kết nối."
+
+    def list_network_connections(self):
+        # Lấy tất cả các kết nối mạng đang hoạt động
+        connections = psutil.net_connections(kind='inet')  # 'inet' là loại kết nối IPv4 và IPv6
+
+        for conn in connections:
+            print(f"Địa chỉ địa phương: {conn.laddr.ip}:{conn.laddr.port}")
+            if conn.raddr:
+                print(f"Địa chỉ từ xa: {conn.raddr.ip}:{conn.raddr.port}")
+            else:
+                print("Địa chỉ từ xa: Không có kết nối")
+            print(f"Trạng thái: {conn.status}")
+            print(f"Loại giao thức: {conn.type}")
+            print("-" * 50)
+
+    def on_role_changed(self, role):
+        if role == "server":
+            # Lấy địa chỉ IP của máy tính
+            print(self.list_network_connections())
+            ip = self.get_ip_address()
+            self.ui.lineEditIP.setText(ip)
+            self.ui.pushButtonCreateServer.setVisible(True)
+            self.ui.pushButtonJoinServer.setVisible(False)
+        if role == "client":
+            # # Lấy địa chỉ IP của máy tính
+            # print(self.list_network_connections())
+            # ip = self.get_ip_address()
+            # self.ui.lineEditIP.setText(ip)
+            self.ui.pushButtonCreateServer.setVisible(False)
+            self.ui.pushButtonJoinServer.setVisible(True)
+
+    def get_ip_address(self):
+        # Lấy địa chỉ IP của máy tính
+        host_info = QHostInfo.localHostName()
+        ip = QHostInfo.fromName(host_info).addresses()
+        return ip[1].toString() if ip else "Không tìm thấy IP"
+
 
     def update_sky_window(self):
         global sky
